@@ -1,7 +1,9 @@
 ---
 title: "Lab5"
-format: html
-editor: visual
+author: ""
+format:
+  html:
+    embed-resources: true
 ---
 
 ## Setup in R
