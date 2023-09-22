@@ -172,7 +172,7 @@ summary(dat_midp)
 
 ```{r}
 #use leaflet to visualize points (Question 2, 3), applying different colors
-#library(leaflet)
+library(leaflet)
 
 leaflet(dat) %>% 
   addProviderTiles('CartoDB.Positron') %>% 
