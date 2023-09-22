@@ -1,28 +1,247 @@
 ---
-title: ""
-author: ""
-format:
-  html:
-    embed-resources: true
+title: "Lab5"
+format: html
+editor: visual
 ---
 
-## Quarto
-
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+## Setup in R
 
 ```{r}
-1 + 1
-```
+library(dtplyr)
+library(dplyr)
+library(data.table)
 
-You can add options to executable code like this
+#load data 
+if (!file.exists("met_all.gz"))
+  download.file(
+    url = "https://raw.githubusercontent.com/USCbiostats/data-science-data/master/02_met/met_all.gz",
+    destfile = "met_all.gz",
+    method   = "libcurl",
+    timeout  = 60
+    )
+met <- data.table::fread("met_all.gz")
+```
 
 ```{r}
-#| echo: false
-2 * 2
+summary(met)
+nrow(met)
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+```{r}
+#need library(data.table) for fread 
+
+#download the data 
+stations <- fread("ftp://ftp.ncdc.noaa.gov/pub/data/noaa/isd-history.csv")
+stations[, USAF := as.integer(USAF)]
+
+# Dealing with NAs and 999999
+stations[, USAF   := fifelse(USAF == 999999, NA_integer_, USAF)]
+stations[, CTRY   := fifelse(CTRY == "", NA_character_, CTRY)]
+stations[, STATE  := fifelse(STATE == "", NA_character_, STATE)]
+
+# Selecting the three relevant columns, and keeping unique records
+stations <- unique(stations[, list(USAF, CTRY, STATE)])
+
+# Dropping NAs
+stations <- stations[!is.na(USAF)]
+
+# Removing duplicates
+stations[, n := 1:.N, by = .(USAF)]
+stations <- stations[n == 1,][, n := NULL]
+```
+
+```{r}
+summary(stations)
+```
+
+```{r}
+nrow(stations)
+```
+
+```{r}
+#merge data 
+dat <- merge(
+  x     = met,      
+  y     = stations, 
+  # List of variables to match
+  by.x  = "USAFID",
+  by.y  = "USAF", 
+  # Which obs to keep?
+  all.x = TRUE,      
+  all.y = FALSE
+  )
+head(dat[, list(USAFID, WBAN, STATE)], n = 4)
+```
+
+```{r}
+nrow(dat)
+colnames(dat)
+```
+
+## Question 1
+
+```{r}
+#median temperature, wind speed, and atmospheric pressure
+temp_med <- quantile(dat$temp, probs = 0.5, na.rm = TRUE)
+wind.sp_med <- quantile(dat$wind.sp, probs = 0.5, na.rm = TRUE)
+atm.press_med <- quantile(dat$atm.press, probs = 0.5, na.rm = TRUE)
+```
+
+```{r}
+#stations closest to the median values
+sta_temp_med <- dat %>%
+  filter(temp == temp_med) %>%
+  select(USAFID, temp)
+
+sta_wind.sp_med <- dat %>%
+  filter(wind.sp == wind.sp_med) %>%
+  select(USAFID, wind.sp)
+
+sta_atm.press_med <- dat %>%
+  filter(atm.press == atm.press_med) %>%
+  select(USAFID, atm.press)
+```
+
+```{r}
+sta_temp_med
+sta_wind.sp_med
+sta_atm.press_med
+```
+
+```{r}
+#common stations
+sta_common <- intersect(sta_temp_med$USAFID, 
+                             intersect(sta_wind.sp_med$USAFID, 
+                                       sta_atm.press_med$USAFID))
+sta_common
+```
+
+```{r}
+#station with all three median values 
+sta_med <- dat %>%
+  filter(temp == temp_med, wind.sp == wind.sp_med, atm.press == atm.press_med) %>%
+  select(USAFID, temp)
+sta_med
+```
+
+There is one station that represents the median (of all three variables: temp, wind.sp, atm.press): 722246. There are many overlapping stations with respect to representing the median values overall (more than 3 in this output).
+
+## Question 2
+
+```{r}
+#identify what is the most representative, the median, station per state for euclidean dist.
+#euclidean dist: length of a line segment between two points
+dat_rep <- dat %>%
+  group_by(STATE) %>%
+  mutate(
+    rep = sqrt((temp - median(temp, na.rm = TRUE))^2 +
+                              (wind.sp - median(wind.sp, na.rm = TRUE))^2 +
+                              (atm.press - median(atm.press, na.rm = TRUE))^2)
+  ) %>%
+  arrange(rep, lat) %>%
+  filter(row_number() == 1) %>%
+  select(STATE, USAFID, lat, lon, rep)
+
+dat_rep
+```
+
+## Question 3
+
+```{r}
+#identify what is the station that is closest to the mid-point of the state
+dat_midp <- dat %>%
+  group_by(STATE) %>%
+  mutate(
+    midp = sqrt((lat - median(lat, na.rm = TRUE))^2 +
+                  (lon - median(lon, na.rm = TRUE))^2)
+  ) %>%
+  arrange(midp, lat) %>%
+  filter(row_number() == 1) %>%
+  select(STATE, USAFID, lat, lon, midp)
+
+dat_midp
+```
+
+```{r}
+summary(dat_rep)
+summary(dat_midp)
+```
+
+```{r}
+#use leaflet to visualize points (Question 2, 3), applying different colors
+#library(leaflet)
+
+leaflet(dat) %>% 
+  addProviderTiles('CartoDB.Positron') %>% 
+  addCircleMarkers(
+    data = dat_rep,
+    lng = ~lon, lat = ~lat,
+    radius = 3,
+    color = "blue",
+    fillOpacity = 0.7,
+    popup = ~USAFID) %>% 
+  addCircleMarkers(
+    data = dat_midp,
+    lng = ~lon, lat = ~lat,
+    radius = 3,
+    color = "red",
+    fillOpacity = 0.7,
+    popup = ~USAFID)
+```
+
+## Question 4
+
+```{r}
+#summary table that shows the number of states included, average temperature, wind-speed, and atmospheric pressure by the variable “average temperature level,” which you’ll need to create.
+
+#avg temp for each state
+temp_stateavg <- dat %>%
+  group_by(STATE) %>%
+  summarize(
+    temp_avg = mean(temp, na.rm = TRUE)
+  )
+temp_stateavg
+```
+
+```{r}
+temp_stateavg <- temp_stateavg %>%
+ mutate(
+   Temp_Level = case_when(
+     temp_avg < 20 ~ "Low",
+     temp_avg >= 20 & temp_avg < 25 ~ "Mid",
+     temp_avg >= 25 ~ "High",
+     TRUE ~ "Unknown"
+   ))
+temp_stateavg
+```
+
+```{r}
+#using quantile()
+# temp_quant <- quantile(dat$temp, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+# 
+# dat <- dat %>%
+#   mutate(
+#     temp_lvl = case_when(
+#       temp < temp_quant[2] ~ "Low",
+#       temp >= temp_quant[2] & temp < temp_quant[3] ~ "Mid",
+#       temp >= temp_quant[3] ~ "High",
+#       TRUE ~ "Unknown"
+#     )
+#   )
+```
+
+```{r}
+#summary table
+dat %>% group_by(STATE) %>%
+    summarise(
+      num_entry = n(),
+      num_NA_temp = sum(is.na(temp)),
+      num_NA_wind.sp = sum(is.na(wind.sp)),
+      num_NA_atm.press = sum(is.na(atm.press)),
+      num_station = n_distinct(USAFID),
+      num_state = n_distinct(STATE),
+      temp_avg      = mean(temp, na.rm=TRUE),
+      wind.sp_avg   = mean(wind.sp, na.rm=TRUE),
+      atm.press_avg = mean(atm.press, na.rm = TRUE)
+    ) %>% arrange(STATE)
+```
