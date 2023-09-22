@@ -12,6 +12,7 @@ format:
 library(dtplyr)
 library(dplyr)
 library(data.table)
+library(R.utils)
 
 #load data 
 if (!file.exists("met_all.gz"))
@@ -30,7 +31,7 @@ nrow(met)
 ```
 
 ```{r}
-#need library(data.table) for fread 
+#need library(data.table), library(R.utils) for fread 
 
 #download the data 
 stations <- fread("ftp://ftp.ncdc.noaa.gov/pub/data/noaa/isd-history.csv")
